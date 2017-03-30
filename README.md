@@ -49,7 +49,7 @@ var file_reqst = require('/path/to/file_reqst.js');
 
    ```javascript
    ...
-   file_reqst({
+   file_reqst.downloadAndSave({
      url: 'https://example.com/file/path',
      name: 'rename.ext'
    });
