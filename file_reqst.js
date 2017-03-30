@@ -102,6 +102,7 @@ function saveFile(res) {
                     }
                 }
             })
+            saveStatus();
             obj.success && obj.success(bk);
         },
         fail: (e) => {
@@ -208,6 +209,7 @@ function clearFile(cbk) {
         })
     }
 
+    saveStatus();
     cbk({
         message: 'ok',
         info: null
