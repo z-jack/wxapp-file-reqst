@@ -1,4 +1,4 @@
-# wxapp-file_reqst
+# wxapp-file-reqst
 A module to manage files and offer a request queue in wxapp.
 
 
