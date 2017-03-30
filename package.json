@@ -1,0 +1,15 @@
+{
+    "name": "wxapp-file_reqst",
+    "email": "jack.zhao9802@gmail.com",
+    "url": "https://jackz.cn",
+    "license": "GPL-3.0",
+    "version": "1.0.0",
+    "description": "A module to manage files and offer a request queue in wxapp.",
+    "keywords": [
+        "wxapp",
+        "file",
+        "manage",
+        "小程序",
+        "微信"
+    ]
+}
