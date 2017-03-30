@@ -101,3 +101,5 @@ var file_reqst = require('/path/to/file_reqst.js');
 
 [z-jack(GitHub)](https://github.com/z-jack)
 
+[npm](https://www.npmjs.com/package/wxapp-file_reqst)
+
