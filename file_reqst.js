@@ -4,13 +4,14 @@ if (typeof (String.prototype.trim) === "undefined") {
     };
 }
 
-fileStatus = {
+var fileStatus = {
     remain: 10485760,
     fileMap: {},
     ready: false
 };
 
-queue = [];
+var download_queue = [],
+    request_queue = [];
 
 function getRemainSpace() {
     if (!fileStatus.ready) {
@@ -25,7 +26,8 @@ function getRemainSpace() {
     |===========|===========|===========|================================================================
     |url        |String     |true       |the url to download resources.
     |name       |String     |false      |rename the file.(default is download name)
-    |collision  |String     |false      |'both' or 'older' or 'newer'.(default is 'newer');
+    |save       |Boolean    |false  |save the file or not.(default is false)
+    |collision  |String     |false      |'both' or 'older' or 'newer'.(default is 'newer')
     |csname     |String     |false      |when collision is set to 'both', file will be renamed to csname.
     |header     |Object     |false      |request header.
     |success    |Function   |false      |the callback when successfully saved.
@@ -34,7 +36,7 @@ function getRemainSpace() {
     
     P.S. csname is required when collision is set to 'both' mode.
 */
-function downloadAndSave(obj) {
+function downloadFile(obj) {
     if (!fileStatus.ready) {
         initStatus();
     }
@@ -42,6 +44,7 @@ function downloadAndSave(obj) {
     if (obj.collision == 'both' && (typeof obj.csname != 'string' || !(obj.csname))) throw ('Error: csname is required.');
     if (!obj.collision || typeof obj.collision != 'string') obj.collision = 'newer';
     if (typeof obj.name != 'string') obj.name = undefined;
+    if (typeof obj.save != 'boolean') obj.save = false;
 
     const downloadExceed = 'downloadFile:fail exceed max download connection count 10';
     const saveExceed = 'saveFile:fail the maximum size of the file storage limit is exceeded';
@@ -73,14 +76,19 @@ function downloadAndSave(obj) {
         url: obj.url,
         header: obj.header,
         success: (res) => {
-            saveFile(res);
-            if (queue.length) {
-                downloadAndSave(queue.shift());
+            if (obj.save) {
+                obj.tempFilePath = res.tempFilePath;
+                saveFile(obj);
+            } else {
+                obj.success && obj.success(res);
+            }
+            if (download_queue.length) {
+                downloadFile(download_queue.shift());
             }
         },
         fail: (e) => {
             if (e.errMsg == downloadExceed) {
-                queue.push(obj);
+                download_queue.push(obj);
             } else {
                 obj.fail && obj.fail(e);
             }
@@ -88,9 +96,9 @@ function downloadAndSave(obj) {
     })
 }
 
-function saveFile(res) {
+function saveFile(obj) {
     wx.saveFile({
-        tempFilePath: res.tempFilePath,
+        tempFilePath: obj.tempFilePath,
         success: (bk) => {
             wx.getSavedFileInfo({
                 filePath: bk.filePath,
@@ -122,7 +130,7 @@ function saveFile(res) {
                         }
                     }
                     removeFile(min.name, () => {
-                        saveFile(res);
+                        saveFile(obj);
                     })
                 }
             } else {
@@ -185,7 +193,7 @@ function removeFile(name, cbk) {
     }
 }
 
-function clearFile(cbk) {
+function clearFiles(cbk) {
     if (!fileStatus.ready) {
         initStatus();
     }
@@ -194,8 +202,14 @@ function clearFile(cbk) {
     }
 
     for (var i in fileStatus.fileMap) {
+        ((i) => {
         wx.removeSavedFile({
             filePath: fileStatus.fileMap[i].filePath,
+            success: () => {
+                fileStatus.remain += fileStatus.fileMap[i].size;
+                delete fileStatus.fileMap[i];
+                saveStatus();
+            },
             fail: (e) => {
                 cbk({
                     message: 'fail',
@@ -207,6 +221,7 @@ function clearFile(cbk) {
                 })
             }
         })
+        })(i);
     }
 
     saveStatus();
@@ -250,9 +265,10 @@ function nameParser(name) {
 
 module.exports = {
     getRemainSpace: getRemainSpace,
-    downloadAndSave: downloadAndSave,
+    downloadFile: downloadFile,
+    saveFile: saveFile,
     getAllFiles: getAllFiles,
     getFile: getFile,
     removeFile: removeFile,
-    clearFile: clearFile
+    clearFiles: clearFiles
 }
