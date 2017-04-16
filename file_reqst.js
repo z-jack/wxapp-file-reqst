@@ -13,6 +13,39 @@ var fileStatus = {
 var download_queue = [],
     request_queue = [];
 
+function request(obj) {
+    if (!fileStatus.ready) {
+        initStatus();
+    }
+    if (!obj || typeof obj != 'object' || !(obj.url)) throw ('Error: Object format error.');
+    if (!(obj.tried) || typeof obj.tried != 'number') obj.tried = 0;
+
+    const requestFail = 'request:fail';
+
+    wx.request({
+        url: obj.url,
+        data: obj.data,
+        header: obj.header,
+        method: obj.method,
+        dataType: obj.dataType,
+        success: (r) => {
+            obj.success && obj.success(r);
+            if (request_queue.length) {
+                request(request_queue.shift());
+            }
+        },
+        fail: (e) => {
+            if (obj.tried >= 5) {
+                obj.fail && obj.fail(e);
+            } else {
+                obj.tried++;
+                request_queue.push(obj);
+            }
+        },
+        complete: obj.complete
+    })
+}
+
 function getRemainSpace() {
     if (!fileStatus.ready) {
         initStatus();
@@ -26,7 +59,7 @@ function getRemainSpace() {
     |===========|===========|===========|================================================================
     |url        |String     |true       |the url to download resources.
     |name       |String     |false      |rename the file.(default is download name)
-    |save       |Boolean    |false  |save the file or not.(default is false)
+    |save       |Boolean    |false      |save the file or not.(default is false)
     |collision  |String     |false      |'both' or 'older' or 'newer'.(default is 'newer')
     |csname     |String     |false      |when collision is set to 'both', file will be renamed to csname.
     |header     |Object     |false      |request header.
@@ -47,7 +80,6 @@ function downloadFile(obj) {
     if (typeof obj.save != 'boolean') obj.save = false;
 
     const downloadExceed = 'downloadFile:fail exceed max download connection count 10';
-    const saveExceed = 'saveFile:fail the maximum size of the file storage limit is exceeded';
 
     var name = nameParser(obj.name || obj.url);
     if (fileStatus.fileMap[name])
@@ -57,16 +89,7 @@ function downloadFile(obj) {
                 name = nameParser(obj.csname);
                 break;
             case 'newer':
-                var waiting = true,
-                    busy = false;
-                while (waiting) {
-                    if (!busy) {
-                        busy = true;
-                        removeFile(name, () => {
-                            waiting = false;
-                        })
-                    }
-                }
+                removeFile(name);
                 break;
             case 'older':
                 return;
@@ -92,25 +115,56 @@ function downloadFile(obj) {
             } else {
                 obj.fail && obj.fail(e);
             }
+        },
+        complete: (e) => {
+            if (!obj.save) {
+                obj.complete && obj.complete(e);
+            }
         }
     })
 }
 
 function saveFile(obj) {
+    if (!fileStatus.ready) {
+        initStatus();
+    }
+    if (!obj || typeof obj != 'object' || !(obj.tempFilePath)) throw ('Error: Object format error.');
+    if (obj.collision == 'both' && (typeof obj.csname != 'string' || !(obj.csname))) throw ('Error: csname is required.');
+    if (!obj.collision || typeof obj.collision != 'string') obj.collision = 'newer';
+    if (typeof obj.name != 'string') obj.name = undefined;
+
+    const saveExceed = 'saveFile:fail the maximum size of the file storage limit is exceeded';
+
+    var name = nameParser(obj.name || obj.url);
+    if (fileStatus.fileMap[name])
+        switch (obj.collision) {
+            case 'both':
+                if (fileStatus.fileMap[nameParser(obj.csname)]) throw ('Error: File named ' + nameParser(obj.csname) + ' already exists.');
+                name = nameParser(obj.csname);
+                break;
+            case 'newer':
+                removeFile(name);
+                break;
+            case 'older':
+                return;
+        }
+    if (!name) throw ('Error: Name cannot be empty.');
+
     wx.saveFile({
         tempFilePath: obj.tempFilePath,
         success: (bk) => {
             wx.getSavedFileInfo({
-                filePath: bk.filePath,
+                filePath: bk.savedFilePath,
                 success: (alres) => {
                     fileStatus.fileMap[name] = {
-                        filePath: bk.filePath,
+                        filePath: bk.savedFilePath,
                         createTime: alres.createTime,
                         size: alres.size
                     }
+                    fileStatus.remain -= alres.size;
+                    saveStatus();
                 }
             })
-            saveStatus();
             obj.success && obj.success(bk);
         },
         fail: (e) => {
@@ -203,24 +257,24 @@ function clearFiles(cbk) {
 
     for (var i in fileStatus.fileMap) {
         ((i) => {
-        wx.removeSavedFile({
-            filePath: fileStatus.fileMap[i].filePath,
-            success: () => {
-                fileStatus.remain += fileStatus.fileMap[i].size;
-                delete fileStatus.fileMap[i];
-                saveStatus();
-            },
-            fail: (e) => {
-                cbk({
-                    message: 'fail',
-                    info: {
-                        name: i,
-                        filePath: fileStatus.fileMap[i].filePath,
-                        detail: e.errMsg
-                    }
-                })
-            }
-        })
+            wx.removeSavedFile({
+                filePath: fileStatus.fileMap[i].filePath,
+                success: () => {
+                    fileStatus.remain += fileStatus.fileMap[i].size;
+                    delete fileStatus.fileMap[i];
+                    saveStatus();
+                },
+                fail: (e) => {
+                    cbk({
+                        message: 'fail',
+                        info: {
+                            name: i,
+                            filePath: fileStatus.fileMap[i].filePath,
+                            detail: e.errMsg
+                        }
+                    })
+                }
+            })
         })(i);
     }
 
@@ -233,24 +287,24 @@ function clearFiles(cbk) {
 
 function initStatus() {
     fileStatus = wx.getStorageSync('file_reqst_status') || fileStatus;
-    var busy = false;
-    while (!fileStatus.ready) {
-        if (!busy) {
-            busy = true;
-            wx.getSavedFileList({
-                success: function (res) {
-                    for (var i in res.fileList) {
-                        fileStatus.fileMap[nameParser(res.fileList[i].filePath)] = res.fileList[i];
-                        fileStatus.remain -= res.fileList[i].size;
-                    }
-                    fileStatus.ready = true;
-                },
-                fail: () => {
-                    fileStatus.ready = true;
+    if (!fileStatus.ready)
+        wx.getSavedFileList({
+            success: function (res) {
+                for (var i in res.fileList) {
+                    fileStatus.fileMap[nameParser(res.fileList[i].filePath)] = res.fileList[i];
+                    fileStatus.remain -= res.fileList[i].size;
                 }
-            })
-        }
-    }
+                fileStatus.ready = true;
+                saveStatus();
+            },
+            fail: () => {
+                fileStatus.ready = true;
+            },
+            complete: (e) => {
+                saveStatus();
+            }
+        })
+    fileStatus.ready = true;
     saveStatus();
 }
 
@@ -264,6 +318,7 @@ function nameParser(name) {
 }
 
 module.exports = {
+    request: request,
     getRemainSpace: getRemainSpace,
     downloadFile: downloadFile,
     saveFile: saveFile,
